@@ -1,0 +1,534 @@
+
+
+rm(list=ls())
+
+# packages needed #
+
+require(ggplot2)
+require(tidyverse)
+require(grid)
+require(glmmTMB)
+require(ggeffects)
+require(lme4)
+require(lmerTest)
+require(gridExtra)
+require(car)
+require(VCA)
+
+# Choose path
+setwd("")
+
+####Statistics 2.4.1####
+#### mean & max fruit size ####
+
+maxmin.df = read.csv("maxmeanfruit.csv", header=T, sep=";", dec=".")
+str(maxmin.df)
+
+#mean fruit size
+anova(lm(meanfruit~gape, maxmin.df[maxmin.df$number > 6,]))
+#max fruit size
+anova(lm(maxfruit~gape, maxmin.df[maxmin.df$number > 6,]))
+
+#### No. of disperser per plant species ####
+divers.disp = read.table("divers_disp.csv", header=TRUE, sep=";", dec=".")
+head(divers.disp)
+
+divers.m1 = glm(diversity~f.diameter, divers.disp, family=poisson)
+summary(divers.m1)
+car::Anova(divers.m1)
+
+# simulating gape widths of individual birds
+set.seed(42)
+gape.erru = rnorm(500, mean=0.78, sd=0.036)
+gape.sybo = rnorm(500, mean=0.82, sd=0.037)
+gape.syat = rnorm(500, mean=0.81, sd=0.033)
+gape.tuph = rnorm(500, mean=1.29, sd=0.037)
+gape.tume = rnorm(500, mean=1.34, sd=0.101)
+
+simgapes.df = data.frame(matrix(NA, nrow=2500, ncol=2))
+colnames(simgapes.df)=c("gape.size", "animals")
+simgapes.df[1:500,1] = gape.erru
+simgapes.df[501:1000,1] = gape.sybo
+simgapes.df[1001:1500,1] = gape.syat
+simgapes.df[1501:2000,1] = gape.tuph
+simgapes.df[2001:2500,1] = gape.tume
+simgapes.df[1:500,2] = "Er"
+simgapes.df[501:1000,2] = "Sb"
+simgapes.df[1001:1500,2] = "Sa"
+simgapes.df[1501:2000,2] = "Tp"
+simgapes.df[2001:2500,2] = "Tm"
+simgapes.df
+
+backcolour.palette = viridis::plasma(5, begin=0, end=0.8, direction=-1)
+
+ggplot(simgapes.df, aes(x=gape.size, colour=animals, fill=animals))+
+  ggridges::geom_density_ridges(aes(y=animals), alpha=0.4)+
+  scale_colour_manual(values=backcolour.palette)+
+  scale_fill_manual(values=backcolour.palette)+
+  #facet_wrap(~animals, nrow=1)+
+  xlim(1.7,0.4)+
+  scale_y_discrete(position = "right")+
+  #  name(x="Gape size [cm]")+
+  theme_classic()+theme(legend.position = "none")
+
+#### Variance component analyses ####
+leonie.df <- read.table("fruitseeddata.csv", header=TRUE, sep=";", dec=".")
+str(leonie.df)
+
+#short data preparation, see also materials and method section
+leonie.df$parent = as.factor(leonie.df$parent)
+leonie.df$plant = as.factor(leonie.df$plant)
+leonie.df$id = as.factor(leonie.df$id)
+
+leonie.df$f.diameter = (leonie.df$f.size1+leonie.df$f.size2)/2
+leonie.df$mean.seeds = leonie.df$t.seeds / leonie.df$no.seeds
+
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Eueu"] <- "E. europaeus"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Fral"] <- "F. alnus"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Prpa"] <- "P. padus"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Rhca"] <- "R. cathartica"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Rini"] <- "R. nigrum"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Risp"] <- "R. spicatum"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Sani"] <- "S. nigra"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Soau"] <- "S. aucuparia"
+levels(leonie.df$plant)[levels(leonie.df$plant)=="Viop"] <- "V. opulus"
+
+# replicate structure
+table(leonie.df$parent, leonie.df$plant)
+
+#fruit traits
+varPlot(f.diameter~plant/parent, leonie.df)
+vca.leonie = fitVCA(f.diameter~plant/parent, leonie.df, method=c("anova"))
+inf.leonie <- VCAinference(vca.leonie, VarVC=TRUE, ci.method = "satterthwaite")
+inf.leonie
+
+#seed traits
+#mean seed mass
+#remove NA values
+leonie.df2 = leonie.df[complete.cases(leonie.df$mean.seeds),]
+
+varPlot(mean.seeds~plant/parent, leonie.df2)
+vca.leonie3 = fitVCA(mean.seeds~plant/parent, leonie.df2, method=c("anova"))
+vca.leonie3
+inf.leonie3 <- VCAinference(vca.leonie3, VarVC=TRUE, ci.method = "satterthwaite")
+inf.leonie3
+
+#### Statistics 2.4.2 - Fruit-seed trait relationships - number of seeds ####
+#reduce dataframe to species only relevant for studying fruit size~number of seeds correlations
+leonie.df.noseeds = leonie.df[leonie.df$plant == "R. cathartica" | leonie.df$plant == "R. nigrum" | leonie.df$plant == "R. spicatum" | leonie.df$plant == "S. aucuparia",]
+leonie.df.noseeds$f.diameter_cm = leonie.df.noseeds$f.diameter/10
+str(leonie.df.noseeds$f.diameter_cm)
+
+# lets z-transform fruit diameter and number of seeds
+leonie.df.noseeds = transform(leonie.df.noseeds, z.no.seeds=ave(no.seeds, plant, FUN=scale))
+
+#single models
+m.noseeds.rhca = lmer(no.seeds~f.diameter_cm+(1|parentname), leonie.df.noseeds[leonie.df.noseeds$plant == "R. cathartica",])
+m.noseeds.rini = glmer(no.seeds~f.diameter_cm+(1|parentname), leonie.df.noseeds[leonie.df.noseeds$plant == "R. nigrum",], family=poisson())
+m.noseeds.risp = glmer(no.seeds~f.diameter_cm+(1|parentname), leonie.df.noseeds[leonie.df.noseeds$plant == "R. spicatum",], family=poisson())
+m.noseeds.soau = lmer(no.seeds~f.diameter_cm+(1|parentname), leonie.df.noseeds[leonie.df.noseeds$plant == "S. aucuparia" ,])
+#note: normal works best in R. cathartica and S. aucuparia
+# but poisson in R. nigrum and R. spicatum
+
+# Wald-Chi²-Test
+Anova(m.noseeds.rhca)
+Anova(m.noseeds.rini)
+Anova(m.noseeds.risp)
+Anova(m.noseeds.soau)
+
+# p-value correction for bonferroni
+p.adjust(p = c(Anova(m.noseeds.rhca)[3],
+               Anova(m.noseeds.rini)[3],
+               Anova(m.noseeds.risp)[3],
+               Anova(m.noseeds.soau)[3]),method="bonferroni")
+
+#### Statistics 2.4.2 - Fruit-seed trait relationships - mean seed mass ####
+leonie.df$f.diameter_cm = leonie.df$f.diameter/10 # from mm to cm
+
+#single models
+m.meanseeds.eueu = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "E. europaeus",])
+m.meanseeds.fral = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "F. alnus",])
+m.meanseeds.prpa = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "P. padus",])
+m.meanseeds.rhca = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "R. cathartica",])
+m.meanseeds.rini = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "R. nigrum",])
+m.meanseeds.risp = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "R. spicatum",])
+m.meanseeds.soau = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "S. aucuparia" & leonie.df$pred == 0 ,])
+# pred = 0 means that only fruits were used that did not show signs of pre-dispersal seed predation by insects
+m.meanseeds.sani = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "S. nigra",])
+m.meanseeds.viop = lmer(mean.seeds~f.diameter_cm+(1|parentname), leonie.df[leonie.df$plant == "V. opulus" ,])
+
+# Wald-Chi²-Test + bonferroni correction
+p.adjust(p = c(Anova(m.meanseeds.eueu)[3],
+               Anova(m.meanseeds.fral)[3],
+               Anova(m.meanseeds.prpa)[3],
+               Anova(m.meanseeds.rhca)[3],
+               Anova(m.meanseeds.rini)[3],
+               Anova(m.meanseeds.risp)[3],
+               Anova(m.meanseeds.sani)[3],
+               Anova(m.meanseeds.soau)[3],
+               Anova(m.meanseeds.viop)[3]),method="bonferroni")
+# Eueu, Rhca, Rini, Risp ns
+# Fral, Prpa, Sani, Soau, Viop significant.
+
+
+#### Statistics 2.4.3 - Consequences of size limitations for dispersed seeds ####
+
+## to keep the R script short, I will present here once the script of how to calculate, in this case, the predicted number 
+# of seeds as a function of gape width for Rhamnus cathartica (used in figure 5 & 6). 
+# The code is the same for all plant species, and is also the same for the analyses with the mean seed mass per fruit 
+# as response variable. To reproduce the data from the ms, set.seed() has to be 42 (number of the universe)!
+
+# mean number of seeds per fruit of R. cathartica
+
+# bootstrapping no.seeds and mean mass of seeds.
+boot.df = function(df, plant, gape.size, n) return(sample_n(df[df$plant==plant & df$f.diameter_cm<=gape.size,], size = n, replace=T))
+Boot = 1000 # number of bootstraps
+
+#rhca no seeds # new test # continuous
+noseeds.rhca.five = noseeds.rhca.six = noseeds.rhca.seven = noseeds.rhca.eight =
+  noseeds.rhca.nine = noseeds.rhca.ten = noseeds.rhca.eleven = noseeds.rhca.twelve = 
+  noseeds.rhca.thirteen = noseeds.rhca.fourteen = list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+
+means.noseeds.rhca.five = means.noseeds.rhca.six = means.noseeds.rhca.seven = 
+  means.noseeds.rhca.eight = means.noseeds.rhca.nine = means.noseeds.rhca.ten =
+  means.noseeds.rhca.eleven = means.noseeds.rhca.twelve = means.noseeds.rhca.thirteen = 
+  means.noseeds.rhca.fourteen = c()
+
+# this loop predicts the mean number of dispersed seeds for gape width for seq(0.5, 1.4, 0.1) for each bootstrap
+# 50 is the number of eaten fruits (replicates) for each bootstrap
+
+set.seed(42)
+for (b in 1:Boot) {
+  noseeds.rhca.five[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.5, 50)
+  means.noseeds.rhca.five[b] = mean(noseeds.rhca.five[[b]]$no.seeds)
+  
+  noseeds.rhca.six[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.6, 50)
+  means.noseeds.rhca.six[b] = mean(noseeds.rhca.six[[b]]$no.seeds)
+  
+  noseeds.rhca.seven[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.7, 50)
+  means.noseeds.rhca.seven[b] = mean(noseeds.rhca.seven[[b]]$no.seeds)
+  
+  noseeds.rhca.eight[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.8, 50)
+  means.noseeds.rhca.eight[b] = mean(noseeds.rhca.eight[[b]]$no.seeds)
+  
+  noseeds.rhca.nine[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.9, 50)
+  means.noseeds.rhca.nine[b] = mean(noseeds.rhca.nine[[b]]$no.seeds)
+  
+  noseeds.rhca.ten[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 1.0, 50)
+  means.noseeds.rhca.ten[b] = mean(noseeds.rhca.ten[[b]]$no.seeds)
+  
+  noseeds.rhca.eleven[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 1.1, 50)
+  means.noseeds.rhca.eleven[b] = mean(noseeds.rhca.eleven[[b]]$no.seeds)
+  
+  noseeds.rhca.twelve[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 1.2, 50)
+  means.noseeds.rhca.twelve[b] = mean(noseeds.rhca.twelve[[b]]$no.seeds)
+  
+  noseeds.rhca.thirteen[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 1.3, 50)
+  means.noseeds.rhca.thirteen[b] = mean(noseeds.rhca.thirteen[[b]]$no.seeds)
+  
+  noseeds.rhca.fourteen[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 1.4, 50)
+  means.noseeds.rhca.fourteen[b] = mean(noseeds.rhca.fourteen[[b]]$no.seeds)
+}
+
+rhca.noseeds.wide = data.frame(cbind(means.noseeds.rhca.five[1:Boot], means.noseeds.rhca.six[1:Boot], means.noseeds.rhca.seven[1:Boot],
+                                     means.noseeds.rhca.eight[1:Boot], means.noseeds.rhca.nine[1:Boot], means.noseeds.rhca.ten[1:Boot], 
+                                     means.noseeds.rhca.eleven[1:Boot], means.noseeds.rhca.twelve[1:Boot],
+                                     means.noseeds.rhca.thirteen[1:Boot], means.noseeds.rhca.fourteen[1:Boot]))
+
+gape.size = c(seq(0.5, 1.4, 0.1))
+colnames(rhca.noseeds.wide) = gape.size
+rhca.noseeds.long = gather(rhca.noseeds.wide, key="gape.size", value="rhca.noseeds")
+tail(rhca.noseeds.long)
+rhca.noseeds.long$gape.size = as.numeric(rhca.noseeds.long$gape.size)
+
+pointrange.rhca = data.frame(matrix(NA, nrow=length(gape.size), ncol=4))
+colnames(pointrange.rhca) = c("mean", "ymin", "ymax","gape.size")
+
+for (i in 1:length(gape.size)){
+  pointrange.rhca$mean[i] = mean(rhca.noseeds.long$rhca.noseeds[rhca.noseeds.long$gape.size == as.factor(gape.size[i])])
+  pointrange.rhca$ymin[i] = quantile(rhca.noseeds.long$rhca.noseeds[rhca.noseeds.long$gape.size == as.factor(gape.size[i])], probs=c(0.025, 0.975))[1]
+  pointrange.rhca$ymax[i] = quantile(rhca.noseeds.long$rhca.noseeds[rhca.noseeds.long$gape.size == as.factor(gape.size[i])], probs=c(0.025, 0.975))[2]
+}
+pointrange.rhca$gape.size = c(seq(0.5, 1.4, 0.1))
+pointrange.rhca
+
+ggplot()+
+  geom_line(pointrange.rhca, mapping=aes(x=gape.size, y=mean))+
+  geom_ribbon(pointrange.rhca, mapping=aes(x=gape.size, y=mean, ymin=ymin, ymax=ymax), alpha=0.3)+
+  scale_y_continuous(name="Number of seeds", limits=c(1,3), breaks=seq(0,10,0.5))+
+  scale_x_continuous(limits=c(0.4,1.4), name="Gape size [cm]", breaks=seq(0,1.4,0.2))+  
+  geom_vline(xintercept = c(1.34), color=colour.palette[2], size=0.5)+
+  geom_vline(xintercept = c(1.29), color=colour.palette[1], size=0.5)+
+  geom_vline(xintercept = c(0.82), color=colour.palette[3], size=0.5)+
+  geom_vline(xintercept = c(0.81), color=colour.palette[4], size=0.5)+
+  geom_vline(xintercept = c(0.78), color=colour.palette[5], size=0.5)+
+  theme_classic()+theme(panel.border = element_rect(size = 0.5, fill=NA),
+                        strip.background = element_blank())
+
+# figure for manuscript
+# now: pair-wise species tests!
+
+#rhca no seeds
+noseeds.rhca.erru = noseeds.rhca.syat = noseeds.rhca.sybo = noseeds.rhca.tume =
+  list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+means.noseeds.rhca.erru = means.noseeds.rhca.syat = means.noseeds.rhca.sybo = 
+  means.noseeds.rhca.tume = c()
+
+# the following code is the same as above, only now the number of seeds is predicted for the species-specific 
+# gape width of each of the main dispersers
+# E. rubecula = 0.78, S. borin = 0.81, S. atricapilla = 0.82, T. merula (and all other large-gaped dispersers combined) = 1.34
+
+set.seed(42)
+for (b in 1:Boot) {
+  noseeds.rhca.erru[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.78, 50)
+  means.noseeds.rhca.erru[b] = mean(noseeds.rhca.erru[[b]]$no.seeds)
+  
+  noseeds.rhca.sybo[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.81, 50)
+  means.noseeds.rhca.sybo[b] = mean(noseeds.rhca.sybo[[b]]$no.seeds)
+  
+  noseeds.rhca.syat[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 0.82, 50)
+  means.noseeds.rhca.syat[b] = mean(noseeds.rhca.syat[[b]]$no.seeds)
+  
+  noseeds.rhca.tume[[b]] = boot.df(leonie.df.noseeds, "R. cathartica", 1.34, 50)
+  means.noseeds.rhca.tume[b] = mean(noseeds.rhca.tume[[b]]$no.seeds)
+  }
+
+rhca.noseeds.wide = data.frame(cbind(means.noseeds.rhca.erru[1:Boot], means.noseeds.rhca.sybo[1:Boot], means.noseeds.rhca.syat[1:Boot],
+                                     means.noseeds.rhca.tume[1:Boot]))
+colnames(rhca.noseeds.wide) = c("Erru", "Sybo", "Syat", "Tume")
+
+# species-wise test
+pFun <- function(x1, x2) {
+  p <- ifelse(sum(x1 < x2)/length(x1) > 0.5, 1 - sum(x1 < x2)/length(x1), sum(x1 < x2)/length(x1)) # one-tailed p-value
+  return(p)
+}
+
+# species-wise effect size
+efFun = function(x1,x2) {
+  p = ifelse(sum(x1 < x2)/length(x1) > 0.5, ((x2-x1) / x2), ((x1-x2)/x2)) # effect size
+  return(p)
+}
+
+p.adjust(p = c(pFun(rhca.noseeds.wide$Erru, rhca.noseeds.wide$Sybo),
+               pFun(rhca.noseeds.wide$Erru, rhca.noseeds.wide$Syat),
+               pFun(rhca.noseeds.wide$Erru, rhca.noseeds.wide$Tume),
+               pFun(rhca.noseeds.wide$Syat, rhca.noseeds.wide$Sybo),
+               pFun(rhca.noseeds.wide$Syat, rhca.noseeds.wide$Tume),
+               pFun(rhca.noseeds.wide$Sybo, rhca.noseeds.wide$Tume)), method="bonferroni")
+# no differences in the predicted number of seeds between the different main dispersers in R. cathartica
+
+
+
+### Please note: To keep the R script short 
+# we will only present the code for bootstrapping and the species comparisons hereafter.
+
+#R. nigrum & no seeds 
+# species wise comparisons 
+noseeds.rini.erru = noseeds.rini.sybo = noseeds.rini.syat = noseeds.rini.tume = 
+  list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+means.noseeds.rini.erru = means.noseeds.rini.sybo = means.noseeds.rini.syat = 
+  means.noseeds.rini.tume = c()
+
+rini.pvalues = rini.effect = data.frame(matrix(data=NA, nrow=50, ncol=6))
+
+set.seed(42)
+for (a in 1:50) {
+  for (b in 1:Boot) {
+  noseeds.rini.erru[[b]] = boot.df(leonie.df.noseeds, "R. nigrum", 0.78, 50)
+  means.noseeds.rini.erru[b] = mean(noseeds.rini.erru[[b]]$no.seeds)
+  
+  noseeds.rini.syat[[b]] = boot.df(leonie.df.noseeds, "R. nigrum", 0.81, 50)
+  means.noseeds.rini.syat[b] = mean(noseeds.rini.syat[[b]]$no.seeds)
+  
+  noseeds.rini.sybo[[b]] = boot.df(leonie.df.noseeds, "R. nigrum", 0.82, 50)
+  means.noseeds.rini.sybo[b] = mean(noseeds.rini.sybo[[b]]$no.seeds)
+  
+  noseeds.rini.tume[[b]] = boot.df(leonie.df.noseeds, "R. nigrum", 1.34, 50)
+  means.noseeds.rini.tume[b] = mean(noseeds.rini.tume[[b]]$no.seeds)
+  }
+  rini.noseeds.wide2 = data.frame(cbind(means.noseeds.rini.erru[1:Boot], means.noseeds.rini.syat[1:Boot], means.noseeds.rini.sybo[1:Boot],
+                                          means.noseeds.rini.tume[1:Boot]))
+  colnames(rini.noseeds.wide2) = c("Erru", "Syat", "Sybo", "Tume")
+  
+  for (d in 1:6){
+    rini.effect[a,d] = c(efFun(rini.noseeds.wide2$Erru, rini.noseeds.wide2$Syat),
+                         efFun(rini.noseeds.wide2$Erru, rini.noseeds.wide2$Sybo),
+                         efFun(rini.noseeds.wide2$Erru, rini.noseeds.wide2$Tume),
+                         efFun(rini.noseeds.wide2$Syat, rini.noseeds.wide2$Sybo),
+                         efFun(rini.noseeds.wide2$Syat, rini.noseeds.wide2$Tume),
+                         efFun(rini.noseeds.wide2$Sybo, rini.noseeds.wide2$Tume))[d]
+    
+    rini.pvalues[a,d] = p.adjust(p = c(pFun(rini.noseeds.wide2$Erru, rini.noseeds.wide2$Syat), # X1
+                                       pFun(rini.noseeds.wide2$Erru, rini.noseeds.wide2$Sybo), # X2
+                                       pFun(rini.noseeds.wide2$Erru, rini.noseeds.wide2$Tume), # X3
+                                       pFun(rini.noseeds.wide2$Syat, rini.noseeds.wide2$Sybo), # X4
+                                       pFun(rini.noseeds.wide2$Syat, rini.noseeds.wide2$Tume), # X5
+                                       pFun(rini.noseeds.wide2$Sybo, rini.noseeds.wide2$Tume)),method="bonferroni")[d] # X6
+  
+  }}
+
+colMeans(rini.effect)
+colMeans(rini.pvalues, na.rm=T)
+
+# Risp no seeds #
+noseeds.risp.erru = noseeds.risp.sybo = noseeds.risp.syat = noseeds.risp.tume =
+  list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+means.noseeds.risp.erru = means.noseeds.risp.sybo = means.noseeds.risp.syat = 
+  means.noseeds.risp.tume = c()
+
+set.seed(42)
+for (b in 1:Boot) {
+  noseeds.risp.erru[[b]] = boot.df(leonie.df.noseeds, "R. spicatum", 0.78, 50)
+  means.noseeds.risp.erru[b] = mean(noseeds.risp.erru[[b]]$no.seeds)
+  
+  noseeds.risp.syat[[b]] = boot.df(leonie.df.noseeds, "R. spicatum", 0.81, 50)
+  means.noseeds.risp.syat[b] = mean(noseeds.risp.syat[[b]]$no.seeds)
+  
+  noseeds.risp.sybo[[b]] = boot.df(leonie.df.noseeds, "R. spicatum", 0.82, 50)
+  means.noseeds.risp.sybo[b] = mean(noseeds.risp.sybo[[b]]$no.seeds)
+  
+  noseeds.risp.tume[[b]] = boot.df(leonie.df.noseeds, "R. spicatum", 1.34, 50)
+  means.noseeds.risp.tume[b] = mean(noseeds.risp.tume[[b]]$no.seeds)
+}
+
+risp.noseeds.wide = data.frame(cbind(means.noseeds.risp.erru[1:Boot], means.noseeds.risp.syat[1:Boot], means.noseeds.risp.sybo[1:Boot],
+                                     means.noseeds.risp.tume[1:Boot]))
+colnames(risp.noseeds.wide) = c("Erru", "Syat", "Sybo", "Tume")
+
+p.adjust(p = c(pFun(risp.noseeds.wide$Erru, risp.noseeds.wide$Syat),
+               pFun(risp.noseeds.wide$Erru, risp.noseeds.wide$Sybo),
+               pFun(risp.noseeds.wide$Erru, risp.noseeds.wide$Tume),
+               pFun(risp.noseeds.wide$Syat, risp.noseeds.wide$Sybo),
+               pFun(risp.noseeds.wide$Syat, risp.noseeds.wide$Tume),
+               pFun(risp.noseeds.wide$Sybo, risp.noseeds.wide$Tume)),method="bonferroni")
+# no differences for R. spicatum (Risp)
+
+# pair-wise frugivore comparisons for mean seed mass of Fragula alnus
+meanseeds.fral.erru = meanseeds.fral.sybo = meanseeds.fral.syat = meanseeds.fral.tume =
+  list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+means.meanseeds.fral.erru = means.meanseeds.fral.sybo = means.meanseeds.fral.syat = 
+  means.meanseeds.fral.tume = c()
+
+fral.pvalues = fral.effect = data.frame(matrix(data=NA, nrow=50, ncol=6))
+
+set.seed(42)
+for (a in 1:50){ 
+  for (b in 1:Boot) {
+    meanseeds.fral.erru[[b]] = boot.df(leonie.df, "F. alnus", 0.78, 50)
+    means.meanseeds.fral.erru[b] = mean(meanseeds.fral.erru[[b]]$mean.seeds, na.rm=T)
+    
+    meanseeds.fral.syat[[b]] = boot.df(leonie.df, "F. alnus", 0.81, 50)
+    means.meanseeds.fral.syat[b] = mean(meanseeds.fral.syat[[b]]$mean.seeds, na.rm=T)
+    
+    meanseeds.fral.sybo[[b]] = boot.df(leonie.df, "F. alnus", 0.82, 50)
+    means.meanseeds.fral.sybo[b] = mean(meanseeds.fral.sybo[[b]]$mean.seeds, na.rm=T)
+    
+    meanseeds.fral.tume[[b]] = boot.df(leonie.df, "F. alnus", 1.34, 50)
+    means.meanseeds.fral.tume[b] = mean(meanseeds.fral.tume[[b]]$mean.seeds, na.rm=T)
+  }
+  
+  fral.meanseeds.wide2 = data.frame(cbind(means.meanseeds.fral.erru[1:Boot], means.meanseeds.fral.syat[1:Boot], means.meanseeds.fral.sybo[1:Boot],
+                                          means.meanseeds.fral.tume[1:Boot]))
+  colnames(fral.meanseeds.wide2) = c("Erru", "Syat", "Sybo", "Tume")
+  
+  #extra loop for 50 repetitions
+  for (d in 1:6){
+    fral.effect[a,d] = c(efFun(fral.meanseeds.wide2$Erru, fral.meanseeds.wide2$Syat),
+                         efFun(fral.meanseeds.wide2$Erru, fral.meanseeds.wide2$Sybo),
+                         efFun(fral.meanseeds.wide2$Erru, fral.meanseeds.wide2$Tume),
+                         efFun(fral.meanseeds.wide2$Syat, fral.meanseeds.wide2$Sybo),
+                         efFun(fral.meanseeds.wide2$Syat, fral.meanseeds.wide2$Tume),
+                         efFun(fral.meanseeds.wide2$Sybo, fral.meanseeds.wide2$Tume))[d]
+    
+    fral.pvalues[a,d] = p.adjust(p = c(pFun(fral.meanseeds.wide2$Erru, fral.meanseeds.wide2$Syat), # X1
+                               pFun(fral.meanseeds.wide2$Erru, fral.meanseeds.wide2$Sybo), # X2
+                               pFun(fral.meanseeds.wide2$Erru, fral.meanseeds.wide2$Tume), # X3
+                               pFun(fral.meanseeds.wide2$Syat, fral.meanseeds.wide2$Sybo), # X4
+                               pFun(fral.meanseeds.wide2$Syat, fral.meanseeds.wide2$Tume), # X5
+                               pFun(fral.meanseeds.wide2$Sybo, fral.meanseeds.wide2$Tume)),method="bonferroni")[d] # X6
+  }}
+
+colMeans(fral.effect)
+colMeans(fral.pvalues)
+
+# pair-wise frugivore comparisons for mean seed mass of Sorbus aucuparia
+meanseeds.soau.erru = meanseeds.soau.sybo = meanseeds.soau.syat = meanseeds.soau.tume =
+  list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+means.meanseeds.soau.erru = means.meanseeds.soau.sybo = means.meanseeds.soau.syat = 
+  means.meanseeds.soau.tume =  c()
+
+# only non-predated fruits
+leonie.df.soau = leonie.df[leonie.df$plant == "S. aucuparia" & leonie.df$pred == 0,]
+
+#note, the p value depends partially on 
+soau.pvalues = soau.effect = data.frame(matrix(data=NA, nrow=50, ncol=6))
+
+set.seed(42)
+for (a in 1:50){ 
+  for (b in 1:Boot) {
+  meanseeds.soau.erru[[b]] = boot.df(leonie.df.soau, "S. aucuparia", 0.78, 50)
+  means.meanseeds.soau.erru[b] = mean(meanseeds.soau.erru[[b]]$mean.seeds, na.rm=T)
+  
+  meanseeds.soau.syat[[b]] = boot.df(leonie.df.soau, "S. aucuparia", 0.81, 50)
+  means.meanseeds.soau.syat[b] = mean(meanseeds.soau.syat[[b]]$mean.seeds, na.rm=T)
+  
+  meanseeds.soau.sybo[[b]] = boot.df(leonie.df.soau, "S. aucuparia", 0.82, 50)
+  means.meanseeds.soau.sybo[b] = mean(meanseeds.soau.sybo[[b]]$mean.seeds, na.rm=T)
+  
+  meanseeds.soau.tume[[b]] = boot.df(leonie.df.soau, "S. aucuparia", 1.34, 50)
+  means.meanseeds.soau.tume[b] = mean(meanseeds.soau.tume[[b]]$mean.seeds, na.rm=T)
+}
+
+soau.meanseeds.wide2 = data.frame(cbind(means.meanseeds.soau.erru[1:Boot], means.meanseeds.soau.syat[1:Boot], means.meanseeds.soau.sybo[1:Boot],
+                                        means.meanseeds.soau.tume[1:Boot]))
+colnames(soau.meanseeds.wide2) = c("Erru", "Syat", "Sybo", "Tume")
+
+for (d in 1:6){
+  soau.effect[a,d] = c(efFun(soau.meanseeds.wide2$Erru, soau.meanseeds.wide2$Syat),
+                       efFun(soau.meanseeds.wide2$Erru, soau.meanseeds.wide2$Sybo),
+                       efFun(soau.meanseeds.wide2$Erru, soau.meanseeds.wide2$Tume),
+                       efFun(soau.meanseeds.wide2$Syat, soau.meanseeds.wide2$Sybo),
+                       efFun(soau.meanseeds.wide2$Syat, soau.meanseeds.wide2$Tume),
+                       efFun(soau.meanseeds.wide2$Sybo, soau.meanseeds.wide2$Tume))[d]
+  
+  soau.pvalues[a,d] = p.adjust(p = c(pFun(soau.meanseeds.wide2$Erru, soau.meanseeds.wide2$Syat), # X1
+               pFun(soau.meanseeds.wide2$Erru, soau.meanseeds.wide2$Sybo), # X2
+               pFun(soau.meanseeds.wide2$Erru, soau.meanseeds.wide2$Tume), # X3
+               pFun(soau.meanseeds.wide2$Syat, soau.meanseeds.wide2$Sybo), # X4
+               pFun(soau.meanseeds.wide2$Syat, soau.meanseeds.wide2$Tume), # X5
+               pFun(soau.meanseeds.wide2$Sybo, soau.meanseeds.wide2$Tume)),method="bonferroni")[d] # X6
+}}
+
+colMeans(soau.effect)
+colMeans(soau.pvalues)
+
+# pair-wise frugivore comparisons for mean seed mass of Viburnum opulus
+min(leonie.df$f.diameter_cm[leonie.df$plant == "V. opulus"])
+# as discussed in the manuscript, E. rubecula and S. atricapilla very not able to feed on V. opulus
+meanseeds.viop.erru = meanseeds.viop.sybo = meanseeds.viop.syat = meanseeds.viop.tume =
+  list(data.frame(matrix(data=NA, nrow=100, ncol=ncol(leonie.df))))
+means.meanseeds.viop.erru = means.meanseeds.viop.sybo = means.meanseeds.viop.syat = 
+  means.meanseeds.viop.tume =  c()
+
+viop.pvalues = viop.effects = data.frame(matrix(data=NA, nrow=50, ncol=1))
+
+set.seed(42)
+for (a in 1:50){ 
+  for (b in 1:Boot) {
+  meanseeds.viop.sybo[[b]] = boot.df(leonie.df, "V. opulus", 0.82, 50)
+  means.meanseeds.viop.sybo[b] = mean(meanseeds.viop.sybo[[b]]$mean.seeds, na.rm=T)
+  
+  meanseeds.viop.tume[[b]] = boot.df(leonie.df, "V. opulus", 1.34, 50)
+  means.meanseeds.viop.tume[b] = mean(meanseeds.viop.tume[[b]]$mean.seeds, na.rm=T)
+  }
+  
+  viop.meanseeds.wide2 = data.frame(cbind(means.meanseeds.viop.sybo[1:Boot],means.meanseeds.viop.tume[1:Boot]))
+  colnames(viop.meanseeds.wide2) = c("Sybo", "Tume")
+  
+  viop.effects[a,1] = c(efFun(viop.meanseeds.wide2$Sybo, viop.meanseeds.wide2$Tume))[1]
+  viop.pvalues[a,1] = p.adjust(p = c(pFun(viop.meanseeds.wide2$Sybo, viop.meanseeds.wide2$Tume)),method="bonferroni")[1]
+}
+
+#effect size & p value: Sybo vs. Tume
+colMeans(viop.effects)
+colMeans(viop.pvalues)

@@ -1,8 +1,10 @@
 ################################################################################
 ################################################################################
+
 This package contains data from:
 
 ################################################################################
+
 Rehling, F., Jaroszewicz, B., Braasch, L.B., Albrecht, J., Jordano, P., Schlautmann, J., Farwig, N., Schabo, D. G. (2021):
 Within-species trait variation can lead to size limitations in seed dispersal of small-fruited plants
 
@@ -10,12 +12,16 @@ Corresponding author - today: Rehling, Finn; University of Freiburg
 Email: finn.rehling@nature.uni-freiburg.de
 
 ################################################################################
+
 The package contains four data files (each in .csv and .xlsx format) that were used in the analyses of the above mentioned publication.
 The R script "Sizelimitations_R" is in .txt format, including the analyses of Rehling et al. (2021).
 
 The structures of the data files are listed below with detailed descriptions of their contents.
+
 ################################################################################
+
 Structure and description of data files that were used in the main analyses
+
 ################################################################################
 
 1. overview_size
